@@ -1,0 +1,60 @@
+extension Templates {
+    struct SEO: Template {
+        struct Context {
+            let title: String
+            let description: String
+            let url: String
+
+            init(title: String, description: String, url: String) {
+                self.title = title
+                self.description = description
+                self.url = url
+            }
+        }
+
+        let context: Context
+
+        func generate(into output: inout TemplateGenerationOutput) {
+            let title = context.title
+            let description = context.description
+            let url = context.url
+
+            print(
+                """
+                  <!-- Primary Meta Tags -->
+                  <meta name="title" content="\(title)">
+                  <meta name="description" content="\(description)">
+
+                  <!-- Open Graph / Facebook -->
+                  <meta property="og:type" content="website">
+                  <meta property="og:site_name" content="\(title)">
+                  <meta property="og:url" content="\(url)">
+                  <meta property="og:title" content="\(title)">
+                  <meta property="og:description" content="\(description)">
+                  <meta property="og:image" content="https://i.imgur.com/b499n4R.png">
+
+                  <!-- Twitter -->
+                  <meta property="twitter:card" content="summary">
+                  <meta property="twitter:url" content="\(url)">
+                  <meta property="twitter:title" content="\(title)">
+                  <meta property="twitter:description" content="\(description)">
+                  <meta property="twitter:image" content="https://i.imgur.com/b499n4R.png">
+
+                  <!-- Microdata -->
+                  <script type="application/ld+json">
+                  {
+                    "@context": "http://schema.org",
+                    "@type": "Website",
+                    "name": "\(title)",
+                    "url": "\(url)",
+                    "description": "\(description)",
+                    "about": {
+                      "@type": "\(title)",
+                      "description": "\(description)"
+                    }
+                  }
+                  </script>
+                """, to: &output)
+        }
+    }
+}
