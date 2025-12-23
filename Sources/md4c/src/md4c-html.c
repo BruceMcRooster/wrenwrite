@@ -51,6 +51,7 @@ typedef struct MD_HTML_tag MD_HTML;
 struct MD_HTML_tag {
     void (*process_output)(const MD_CHAR*, MD_SIZE, void*);
     void* userdata;
+    _Bool in_language_code_block;
     unsigned flags;
     int image_nesting_level;
     char escape_map[256];
@@ -304,6 +305,7 @@ render_open_code_block(MD_HTML* r, const MD_BLOCK_CODE_DETAIL* det)
         RENDER_VERBATIM(r, " class=\"language-");
         render_attribute(r, &det->lang, render_html_escaped);
         RENDER_VERBATIM(r, "\"");
+        r->in_language_code_block = 1;
     }
 
     RENDER_VERBATIM(r, ">");
@@ -413,7 +415,7 @@ leave_block_callback(MD_BLOCKTYPE type, void* detail, void* userdata)
         case MD_BLOCK_LI:       RENDER_VERBATIM(r, "</li>\n"); break;
         case MD_BLOCK_HR:       /*noop*/ break;
         case MD_BLOCK_H:        RENDER_VERBATIM(r, head[((MD_BLOCK_H_DETAIL*)detail)->level - 1]); break;
-        case MD_BLOCK_CODE:     RENDER_VERBATIM(r, "</code></pre>\n"); break;
+        case MD_BLOCK_CODE:     RENDER_VERBATIM(r, "</code></pre>\n"); r->in_language_code_block = 0; break;
         case MD_BLOCK_HTML:     /* noop */ break;
         case MD_BLOCK_P:        RENDER_VERBATIM(r, "</p>\n"); break;
         case MD_BLOCK_TABLE:    RENDER_VERBATIM(r, "</table>\n"); break;
@@ -508,6 +510,7 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
         case MD_TEXT_SOFTBR:    RENDER_VERBATIM(r, (r->image_nesting_level == 0 ? "\n" : " ")); break;
         case MD_TEXT_HTML:      render_verbatim(r, text, size); break;
         case MD_TEXT_ENTITY:    render_entity(r, text, size, render_html_escaped); break;
+        case MD_TEXT_CODE:      if (r->in_language_code_block) { render_verbatim(r, text, size); break; }
         default:                render_html_escaped(r, text, size); break;
     }
 
@@ -527,7 +530,7 @@ md_html(const MD_CHAR* input, MD_SIZE input_size,
         void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
         void* userdata, unsigned parser_flags, unsigned renderer_flags)
 {
-    MD_HTML render = { process_output, userdata, renderer_flags, 0, { 0 } };
+    MD_HTML render = { process_output, userdata, 0, renderer_flags, 0, { 0 } };
     int i;
 
     MD_PARSER parser = {
@@ -564,3 +567,4 @@ md_html(const MD_CHAR* input, MD_SIZE input_size,
 
     return md_parse(input, input_size, &parser, (void*) &render);
 }
+
