@@ -123,11 +123,7 @@ struct WrenWrite {
                     publishedDate: publishedDate,
                     isPage: isPage
                 ) { output in
-                    Templates.Markdown(
-                        context: .init(
-                            filePath: fileURL,
-                            errorHandler: { e in fatalError("Markdown generation error: \(e)") })
-                    ).generate(into: &output)
+                    #warning("Markdown rendering temporarily disabled")
                 }
             ).generate(into: &output)
         }
@@ -179,11 +175,7 @@ struct WrenWrite {
                 nav: navContext,
                 posts: allPosts,
                 content: { output in
-                    Templates.Markdown(
-                        context: .init(
-                            filePath: inputDir.appending(path: "index.md"),
-                            errorHandler: { e in fatalError("Markdown generation error: \(e)") })
-                    ).generate(into: &output)
+                    #warning("Markdown rendering temporarily disabled")
                 }
             )
         ).generate(into: &homeOutput)

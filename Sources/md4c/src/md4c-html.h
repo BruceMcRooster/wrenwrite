@@ -50,15 +50,30 @@
  * (Typical implementation may just output the bytes to a file or append to
  * some buffer).
  * Param userdata is just propagated back to process_output() callback.
+ * Param raw_text_type is a pointer that stores the type of raw text encountered.
  * Param parser_flags are flags from md4c.h propagated to md_parse().
  * Param render_flags is bitmask of MD_HTML_FLAG_xxxx.
  *
  * Returns -1 on error (if md_parse() fails.)
  * Returns 0 on success.
  */
+
+enum MD_HTML_RAW_TEXT_TYPE {
+    /*
+     * This is not text, or is otherwise irrelevant.
+     */
+    MD_HTML_RAW_TEXT_TYPE_NONE = -1,
+    /* This is normal text, and should probably be checked for {{}}s */
+    MD_HTML_RAW_TEXT_TYPE_NORMAL = MD_TEXT_NORMAL,
+    MD_HTML_RAW_TEXT_TYPE_HTML = MD_TEXT_HTML,
+    MD_HTML_RAW_TEXT_TYPE_CODE = MD_TEXT_CODE,
+    MD_HTML_RAW_TEXT_TYPE_LATEXMATH = MD_TEXT_LATEXMATH
+};
+
 int md_html(const MD_CHAR* input, MD_SIZE input_size,
             void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-            void* userdata, unsigned parser_flags, unsigned renderer_flags);
+            void* userdata, enum MD_HTML_RAW_TEXT_TYPE* raw_text_type,
+            unsigned parser_flags, unsigned renderer_flags);
 
 
 #ifdef __cplusplus

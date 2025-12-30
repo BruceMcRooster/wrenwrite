@@ -28,6 +28,7 @@
 
 #include "md4c-html.h"
 #include "entity.h"
+#include "md4c.h"
 
 
 #if !defined(__STDC_VERSION__) || __STDC_VERSION__ < 199409L
@@ -51,6 +52,7 @@ typedef struct MD_HTML_tag MD_HTML;
 struct MD_HTML_tag {
     void (*process_output)(const MD_CHAR*, MD_SIZE, void*);
     void* userdata;
+    enum MD_HTML_RAW_TEXT_TYPE* raw_text_type;
     _Bool in_language_code_block;
     unsigned flags;
     int image_nesting_level;
@@ -500,6 +502,20 @@ static int
 text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdata)
 {
     MD_HTML* r = (MD_HTML*) userdata;
+    
+    if (r->raw_text_type) {
+        switch(type) {
+        case MD_TEXT_NORMAL:
+        case MD_TEXT_CODE:
+        case MD_TEXT_HTML:
+        case MD_TEXT_LATEXMATH:
+            *(r->raw_text_type) = (enum MD_HTML_RAW_TEXT_TYPE) type;
+            break;
+        default:
+            *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_NONE;
+            break;
+        }
+    }
 
     switch(type) {
         case MD_TEXT_NULLCHAR:  render_utf8_codepoint(r, 0x0000, render_verbatim); break;
@@ -508,10 +524,15 @@ text_callback(MD_TEXTTYPE type, const MD_CHAR* text, MD_SIZE size, void* userdat
                                         : " "));
                                 break;
         case MD_TEXT_SOFTBR:    RENDER_VERBATIM(r, (r->image_nesting_level == 0 ? "\n" : " ")); break;
+        case MD_TEXT_LATEXMATH: // Should render without escaping, because blahtex will handle that later
         case MD_TEXT_HTML:      render_verbatim(r, text, size); break;
         case MD_TEXT_ENTITY:    render_entity(r, text, size, render_html_escaped); break;
         case MD_TEXT_CODE:      if (r->in_language_code_block) { render_verbatim(r, text, size); break; }
         default:                render_html_escaped(r, text, size); break;
+    }
+
+    if (r->raw_text_type) {
+        *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_NONE;
     }
 
     return 0;
@@ -528,9 +549,10 @@ debug_log_callback(const char* msg, void* userdata)
 int
 md_html(const MD_CHAR* input, MD_SIZE input_size,
         void (*process_output)(const MD_CHAR*, MD_SIZE, void*),
-        void* userdata, unsigned parser_flags, unsigned renderer_flags)
+        void* userdata, enum MD_HTML_RAW_TEXT_TYPE* raw_text_type,
+        unsigned parser_flags, unsigned renderer_flags)
 {
-    MD_HTML render = { process_output, userdata, 0, renderer_flags, 0, { 0 } };
+    MD_HTML render = { process_output, userdata, raw_text_type, 0, renderer_flags, 0, { 0 } };
     int i;
 
     MD_PARSER parser = {
@@ -567,4 +589,3 @@ md_html(const MD_CHAR* input, MD_SIZE input_size,
 
     return md_parse(input, input_size, &parser, (void*) &render);
 }
-

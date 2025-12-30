@@ -11,15 +11,20 @@ let package = Package(
     products: [
         .executable(name: "WrenWrite", targets: ["WrenWrite"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.1"),
+    ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .executableTarget(
             name: "WrenWrite",
             dependencies: [
-                "md4c_html"
-            ]
+                .product(name: "Yams", package: "Yams"),
+                "md4c_html",
+            ],
         ),
+        .testTarget(name: "WrenWriteTests", dependencies: ["WrenWrite"]),
         .target(
             name: "md4c_html",
             path: "Sources/md4c",
