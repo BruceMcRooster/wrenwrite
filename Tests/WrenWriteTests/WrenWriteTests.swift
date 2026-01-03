@@ -255,4 +255,86 @@ struct MarkdownRenderingTests {
             #expect(Bool(false), "A math chunk was not the 4th content element")
         }
     }
+    
+    @Test func htmlURLs() async throws {
+        let output = Output()
+
+        let markdown = """
+            This is a manually typed inline <a href="https://example.com">link</a> that should be caught
+
+            This image has a `srcset`, and spans multiple lines
+
+            <div>
+                <img srcset="something.jpg
+                    something-bigger.jpg">
+            </div>
+
+            These script and style tags link to external things
+
+            <script src="myscript.js"></script>
+            <link rel="stylesheet" href='mystyles.css'>
+
+            And this `<video src="notaurl.mp4"></video>` doesn't have quotes on its `poster` link
+
+            <div><video src='mymedia.mp4' poster=myposter.jpg><track label="English" kind="subtitles" srclang="en" src="subtitles.vtt" /></video></div>
+
+            And finally (this may just blow things up), this block has a preceding space 😱,
+
+              <img src="scared-face.png" />
+            """.data(using: .utf8)!
+
+        let result: (frontmatter: Int?, content: [MarkdownContent]) = try renderMarkdown(
+            from: markdown, writer: output)
+
+        #expect(
+            String(
+                data: getMarkdownContent(from: output.data, basedOn: result.content),
+                encoding: .utf8) == """
+                    <p>This is a manually typed inline <a href="">link</a> that should be caught</p>
+                    <p>This image has a <code>srcset</code>, and spans multiple lines</p>
+                    <div>
+                        <img srcset="">
+                    </div>
+                    <p>These script and style tags link to external things</p>
+                    <script src=""></script>
+                    <link rel="stylesheet" href=''>
+                    <p>And this <code>&lt;video src=&quot;notaurl.mp4&quot;&gt;&lt;/video&gt;</code> doesn't have quotes on its <code>poster</code> link</p>
+                    <div><video src='' poster=><track label="English" kind="subtitles" srclang="en" src="" /></video></div>
+                    <p>And finally (this may just blow things up), this block has a preceding space 😱,</p>
+                      <img src="" />
+
+                    """
+        )
+
+        #expect(result.content.count == 17)
+        
+        let allFoundURLStrings: Array<String> = result.content.compactMap { markdownContent in
+            if case let .url(string) = markdownContent {
+                string
+            } else {
+                nil
+            }
+        }
+        
+        print(allFoundURLStrings)
+        
+        for (index, desiredURLString) in [
+            "https://example.com",
+            "something.jpg\nsomething-bigger.jpg",
+            "myscript.js",
+            "mystyles.css",
+            "mymedia.mp4",
+            "myposter.jpg",
+            "subtitles.vtt",
+            "scared-face.png"
+        ].enumerated() {
+            let foundIndex = allFoundURLStrings.firstIndex(of: desiredURLString)
+            
+            if let foundIndex {
+                #expect(foundIndex == index * 2 + 1)
+            } else {
+                #expect(Bool(false), "Did not find URL: \(desiredURLString)")
+            }
+        }
+    }
 }

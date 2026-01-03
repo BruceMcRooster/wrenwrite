@@ -331,7 +331,9 @@ static void
 render_open_a_span(MD_HTML* r, const MD_SPAN_A_DETAIL* det)
 {
     RENDER_VERBATIM(r, "<a href=\"");
+    *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_URL;
     render_attribute(r, &det->href, render_url_escaped);
+    *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_NONE;
 
     if(det->title.text != NULL) {
         RENDER_VERBATIM(r, "\" title=\"");
@@ -345,7 +347,9 @@ static void
 render_open_img_span(MD_HTML* r, const MD_SPAN_IMG_DETAIL* det)
 {
     RENDER_VERBATIM(r, "<img src=\"");
+    *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_URL;
     render_attribute(r, &det->src, render_url_escaped);
+    *(r->raw_text_type) = MD_HTML_RAW_TEXT_TYPE_NONE;
 
     RENDER_VERBATIM(r, "\" alt=\"");
 }
