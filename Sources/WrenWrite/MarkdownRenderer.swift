@@ -129,6 +129,7 @@ private struct ParsingObject {
     var content: [MarkdownContent] = []
     var state: State?
     let textType: UnsafeMutablePointer<MD_HTML_RAW_TEXT_TYPE>
+    var partialHTML: Data?
 
     enum State {
         /// Represents a partial language code block.
@@ -153,6 +154,11 @@ private struct ParsingObject {
             self.content.append(.renderedHTML(byteRange: byteRange))
         }
     }
+}
+
+enum HTMLRenderError: Error {
+    /// The parser of HTML ran out of data before it reached a satisfactory closing tag/other state
+    case outOfData
 }
 
 func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
@@ -290,7 +296,7 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
             return embedRanges
         }
 
-        func findURLsAndEmbedsIn(_ chunkData: Data) -> (
+        func findURLsAndEmbedsIn(_ chunkData: Data) throws(HTMLRenderError) -> (
             urls: [Range<UInt64>], embeds: [Range<UInt64>]
         ) {
             var urlRanges = [Range<UInt64>]()
@@ -303,7 +309,7 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
             /// Stores the end offset (one past the closing`>`) if the tag was actually an HTML tag stored
             func extractURLsHTMLTag(
                 canCrossLines: Bool, doExtractURLs: Bool = true, beg: Int, end: inout Int
-            ) -> (name: String, isCloser: Bool)? {
+            ) throws(HTMLRenderError) -> (name: String, isCloser: Bool)? {
                 var attr_state: Int8
                 var off = beg
 
@@ -427,11 +433,11 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                 done: while true {
                     while off < line_end && !ISNEWLINE(off) {
                         if attr_state > 40 {
-                            var wasVerbatim = attr_state == 41
+                            let wasVerbatim = attr_state == 41
                             if attr_state == 41 && (ISBLANK(off) || ISANYOF(off, "\"'=<>`")) {
                                 attr_state = 0
-                                off -=
-                                    1 /* Put the char back for re-inspection in the new state. */
+                                // Put the char back for re-inspection in the new state.
+                                off -= 1
                             } else if attr_state == 42 && CH(off) == _T("'") {
                                 attr_state = 0
                             } else if attr_state == 43 && CH(off) == _T("\"") {
@@ -519,8 +525,19 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
 
                     assert(off == line_end)
                     guard off < chunkData.count else {
-                        return nil  // We've reached the end of the chunk, and can't go further, but weren't done
+                        throw .outOfData  // We've reached the end of the chunk, and can't go further, but weren't done
                     }
+
+                    if attr_state == 0 || attr_state == 41 {
+                        if doExtractURLs, attr_state == 41, let extractedAttributeStartIndex {
+                            urlRanges.append(UInt64(extractedAttributeStartIndex)..<UInt64(off))
+                        }
+                        attr_state = 1
+                    }
+
+                    // Must seek *after* collecting a possible ending to unquoted urls,
+                    // and we definitely know we're either going to a new line or throwing
+                    // (so urlRanges doesnt' matter), so we can do the two in any order
 
                     if chunkData[off] == Character("\r").asciiValue! {
                         off += 1  // Double add to get past a \r\n
@@ -530,14 +547,11 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                     off += 1
 
                     guard off < chunkData.count else {
-                        return nil
+                        throw .outOfData
                     }
 
+                    // We can't do this until after seeking, because otherwise it immediately see the "\n" that might have stopped us
                     line_end = findNextLineEnd() ?? chunkData.count
-
-                    if attr_state == 0 || attr_state == 41 {
-                        attr_state = 1
-                    }
                 }
 
                 // done: (equivalent to the goto position)
@@ -554,208 +568,76 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
             while currChunkIndex < chunkData.count {
                 assert(!(inScript && inStyle))
 
-                guard !inScript else {
-                    // Seek to closing </script>
+                guard !inScript && !inStyle else {
+                    var foundCloser = false
+
+                    let blockContentStart = currChunkIndex
+                    var blockContentEnd = currChunkIndex
+
+                    // Seek to closing </tag>
                     while currChunkIndex < chunkData.count {
                         defer { currChunkIndex += 1 }
 
                         if chunkData[currChunkIndex] == Character("<").asciiValue! {
                             var endIndex: Int = currChunkIndex
-
+                            let beforeTagIndex = currChunkIndex - 1
                             // </script> must be on one line
-                            if let (name, isCloser) = extractURLsHTMLTag(
+                            if let (name, isCloser) = try extractURLsHTMLTag(
                                 canCrossLines: false, doExtractURLs: false, beg: currChunkIndex,
                                 end: &endIndex)
                             {
                                 currChunkIndex = endIndex - 1  // -1 for Auto-increment in defer
-                                if isCloser && name == "script" {
+                                if isCloser && name == ((inScript) ? "script" : "style") {
+                                    foundCloser = true
+                                    blockContentEnd = beforeTagIndex
                                     break
                                 }
                             }
                         }
                     }
-                    inScript = false
-                    continue
-                }
 
-                guard !inStyle else {
-                    while currChunkIndex < chunkData.count {
-                        defer { currChunkIndex += 1 }
+                    guard foundCloser else { throw .outOfData }
 
-                        if chunkData[currChunkIndex] == Character("<").asciiValue! {
-                            var endIndex: Int = currChunkIndex
-
-                            if let (name, isCloser) = extractURLsHTMLTag(
-                                canCrossLines: false, doExtractURLs: false, beg: currChunkIndex,
-                                end: &endIndex)
-                            {
-                                if isCloser && name == "style" {
-                                    currChunkIndex = endIndex - 1  // -1 for Auto-increment in defer
-                                    break
-                                }
-                            }
-                        } else if chunkData[currChunkIndex] == Character("u").asciiValue!
-                            || chunkData[currChunkIndex] == Character("U").asciiValue!
+                    if inStyle, blockContentStart < blockContentEnd {  // check for `url` tag
+                        if let fullContents = String(
+                            data: chunkData[blockContentStart..<blockContentEnd], encoding: .utf8)
                         {
-                            guard currChunkIndex + 2 < chunkData.count,
-                                chunkData[currChunkIndex + 1] == Character("r").asciiValue!
-                                    || chunkData[currChunkIndex + 1] == Character("R").asciiValue!,
-                                chunkData[currChunkIndex + 2] == Character("l").asciiValue!
-                                    || chunkData[currChunkIndex + 2] == Character("l").asciiValue!
-                            else {
-                                continue
+                            let utf8View = fullContents.utf8
+
+                            // Based on https://stackoverflow.com/a/34166861
+                            let urlFunctionRegex =
+                                /(?s)url\s*\(\s*(?:'((?:\\.|[^\s'])*)'|"((?:\\.|[^\s"])*)"|((?:\\.|[^\s'"])*))\s*\)/
+                            for match in fullContents.matches(of: urlFunctionRegex) {
+                                guard
+                                    let urlRange = match.output.1 ?? match.output.2
+                                        ?? match.output.3
+                                else { continue }
+
+                                let start = utf8View.distance(
+                                    from: utf8View.startIndex,
+                                    to: urlRange.startIndex.samePosition(in: utf8View)!)
+                                let end = utf8View.distance(
+                                    from: utf8View.startIndex,
+                                    to: urlRange.endIndex.samePosition(in: utf8View)!)
+
+                                urlRanges.append(
+                                    UInt64(
+                                        blockContentStart + start)..<UInt64(blockContentStart + end)
+                                )
                             }
-                            // We have "url", now we just have to search for opening/closing parentheses after some spaces
-
-                            /**
-                             - 0: looking for opening `(`, potentially after some whitespace
-                             - 1: found opening parentheses, looking for quotes or verbatim url start, potentially after whitespace
-                             - 2: looking for closing `)`
-                             - 4: in an unquoted url
-                             - 5: in a single quote url (`'`)
-                             - 6: in a double quote url(`"`)
-                             */
-                            ///- `16 | continue`: found a comment, looking for closing `*‎/` (with no space
-                            var state = 0
-
-                            var urlStartPos: Int? = nil
-                            var foundValidURL: Bool = false
-                            var urlEndPos: Int? = nil
-
-                            urlStateMachine: while currChunkIndex < chunkData.count {
-                                defer { currChunkIndex += 1 }
-
-                                guard state & 16 == 0 else {  // We're in a comment, and generally ignore most anything except the end of the comment
-                                    if chunkData[currChunkIndex] == Character("*").asciiValue!,
-                                        currChunkIndex + 1 < chunkData.count
-                                            && chunkData[currChunkIndex + 1] == Character("/")
-                                                .asciiValue!
-                                    {
-                                        state = state & ~16
-                                    }
-                                    continue urlStateMachine
-                                }
-
-                                switch chunkData[currChunkIndex] {
-                                case Character("/").asciiValue! where state <= 4:  // Comments may be in the middle of an unquoted string
-                                    // Potentially found a comment
-                                    if currChunkIndex + 1 < chunkData.count
-                                        && chunkData[currChunkIndex + 1] == Character("*")
-                                            .asciiValue!
-                                    {
-                                        currChunkIndex += 1
-                                        state = 16 | state
-                                    }
-                                case Character("\\").asciiValue! where state > 2:
-                                    currChunkIndex += 1  // Skip one character, not entirely UTF-8 aware
-                                    guard currChunkIndex < chunkData.count else {
-                                        continue urlStateMachine
-                                    }
-                                    if chunkData[currChunkIndex] == Character("\r").asciiValue!,
-                                        currChunkIndex + 1 < chunkData.count
-                                            && chunkData[currChunkIndex + 1] == Character("\n")
-                                                .asciiValue!
-                                    {
-                                        currChunkIndex += 1
-                                    }
-                                case Character("(").asciiValue! where state == 0 || state == 4:
-                                    if state == 0 {
-                                        state = 1
-                                    } else {
-                                        foundValidURL = false
-                                        break urlStateMachine
-                                    }
-                                case Character("\"").asciiValue!
-                                where state == 1 || state == 4 || state == 6:
-                                    if state == 1 {
-                                        urlStartPos = currChunkIndex + 1
-                                        foundValidURL = true
-                                        state = 6
-                                    } else if state == 4 {  // Found quote when analyzing verbatim url
-                                        foundValidURL = false
-                                        break urlStateMachine
-                                    } else {
-                                        urlEndPos = currChunkIndex
-                                        state = 2
-                                    }
-                                case Character("'").asciiValue!
-                                where state == 1 || state == 4 || state == 5:
-                                    if state == 1 {
-                                        urlStartPos = currChunkIndex + 1
-                                        foundValidURL = true
-                                        state = 5
-                                    } else if state == 4 {  // Found quote when analyzing verbatim url
-                                        foundValidURL = false
-                                        break urlStateMachine
-                                    } else {
-                                        urlEndPos = currChunkIndex
-                                        state = 2
-                                    }
-                                case Character("\n").asciiValue! where state <= 2,
-                                    Character("\r").asciiValue! where state <= 2,
-                                    Character(" ").asciiValue! where state <= 2,
-                                    Character("\t").asciiValue! where state <= 2:
-                                    continue urlStateMachine  // Ignoreable whitespace while looking for whitespace
-                                case Character(" ").asciiValue! where state > 4,
-                                    Character("\t").asciiValue! where state > 4:
-                                    continue urlStateMachine  // Ignoreable whitespace in quoted string
-                                case Character("\n").asciiValue! where state >= 4,
-                                    Character("\r").asciiValue! where state >= 4:
-                                    foundValidURL = false
-                                    break urlStateMachine  // Unallowed whitespace in url string
-                                case Character(" ").asciiValue! where state == 4,
-                                    Character("\t").asciiValue! where state == 4,
-                                    Character(")").asciiValue! where state == 4:
-                                    urlEndPos = currChunkIndex
-                                    currChunkIndex -= 1  // reprocess
-                                    state = 2  // we've gotten out of the unquoted url
-                                case Character("<").asciiValue! where state >= 4:
-                                    if currChunkIndex + 7 < chunkData.count,
-                                        chunkData[currChunkIndex...].starts(with: "</style>".utf8)
-                                    {
-                                        currChunkIndex -= 1  // Needs to get processed as the end outside
-                                        foundValidURL = false
-                                        break urlStateMachine
-                                    }  // Otherwise okay
-                                case Character(")").asciiValue! where state == 2:
-                                    break urlStateMachine
-                                default:
-                                    switch state {
-                                    case 0, 2:  // Got non-whitespace character while accepting only whitespace
-                                        foundValidURL = false
-                                        break urlStateMachine
-                                    case 1:
-                                        foundValidURL = true
-                                        state = 4  // May have begun an unquoted url
-                                    case 4...6:
-                                        continue urlStateMachine  // acceptable characters in url string
-                                    default:
-                                        fatalError("Unexpected state \(state) reached")
-                                    }
-                                }
-                            }
-
-                            guard foundValidURL else {
-                                continue
-                            }
-                            guard let urlStartPos, let urlEndPos,
-                                urlStartPos < urlEndPos,
-                                urlStartPos < chunkData.count, urlEndPos <= chunkData.count
-                            else {
-                                continue
-                            }
-
-                            urlRanges.append(
-                                UInt64(exactly: urlStartPos)!..<UInt64(exactly: urlEndPos)!)
-                        }
+                        } else {
+                            assertionFailure("Failed to parse style tag content as UTF-8")
+                        }  // We'll just fail silently, since this doesn't really matter
                     }
+
+                    inScript = false
                     inStyle = false
                     continue
                 }
 
                 if chunkData[currChunkIndex] == Character("<").asciiValue! {
                     var end = currChunkIndex
-                    if let (tagName, tagIsCloser) = extractURLsHTMLTag(
+                    if let (tagName, tagIsCloser) = try extractURLsHTMLTag(
                         canCrossLines: true, beg: currChunkIndex, end: &end)
                     {
                         currChunkIndex = end - 1  // -1 for increment after loop
@@ -769,6 +651,11 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                 currChunkIndex += 1
             }
 
+            // We may still need to parse more
+            if inScript || inStyle {
+                throw .outOfData
+            }
+
             return (urlRanges, embedRanges)
         }
 
@@ -780,6 +667,17 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
             assertionFailure("Failure to write md4c html data.")
             // We will gracefully abort in regular mode
             return
+        }
+
+        // Ran out of HTML to fix some incomplete parse of it.
+        // Shouldn't happen except on really heinous inputs
+        if typedParsingObjectPointer.pointee.textType.pointee != MD_HTML_RAW_TEXT_TYPE_HTML,
+            let partialHTML = typedParsingObjectPointer.pointee.partialHTML
+        {
+            // Treat what was leftover as just rendered HTML
+            typedParsingObjectPointer.pointee.appendHTMLContent(
+                byteRange: (startOffset - UInt64(partialHTML.count))..<startOffset)
+            typedParsingObjectPointer.pointee.partialHTML = nil
         }
 
         if let state = typedParsingObjectPointer.pointee.state {
@@ -903,10 +801,28 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
             } else if typedParsingObjectPointer.pointee.textType.pointee
                 == MD_HTML_RAW_TEXT_TYPE_HTML
             {
-                let (urlRanges, embedRanges) = findURLsAndEmbedsIn(chunkData)
+                let fullChunkData: Data
+                let fullChunkDataAbsoluteStart: UInt64
+
+                if let existingHTML = typedParsingObjectPointer.pointee.partialHTML {
+                    fullChunkData = existingHTML + chunkData
+                    fullChunkDataAbsoluteStart = startOffset - UInt64(existingHTML.count)
+                } else {
+                    fullChunkData = chunkData
+                    fullChunkDataAbsoluteStart = startOffset
+                }
+
+                guard let (urlRanges, embedRanges) = try? findURLsAndEmbedsIn(fullChunkData) else {
+                    typedParsingObjectPointer.pointee.partialHTML = fullChunkData
+                    return  // Wait for the next time around to try again with more complete HTML
+                }
+
+                // Found successfully, so we need to cleanup
+                typedParsingObjectPointer.pointee.partialHTML = nil
+
                 var (urlIndex, embedIndex) = (0, 0)
 
-                var prevEnd: UInt64 = startOffset
+                var prevEnd: UInt64 = fullChunkDataAbsoluteStart
 
                 while urlIndex < urlRanges.count
                     || embedIndex < embedRanges.count
@@ -925,7 +841,7 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                         urlIndex += 1
 
                         currRange = urlRange
-                        currContent = .url(String(data: chunkData[urlRange], encoding: .utf8)!)
+                        currContent = .url(String(data: fullChunkData[urlRange], encoding: .utf8)!)
                         surroundingWidth = 0
                     } else {
                         assert(embedIndex < embedRanges.count)
@@ -938,7 +854,7 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                         let embedRange = embedRanges[embedIndex]
                         embedIndex += 1
 
-                        let asString = String(data: chunkData[embedRange], encoding: .utf8)!
+                        let asString = String(data: fullChunkData[embedRange], encoding: .utf8)!
 
                         guard let embedType = MarkdownContent.Embed.parse(from: asString) else {
                             continue
@@ -949,8 +865,12 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                         surroundingWidth = 2
                     }
 
-                    let actualRange =
-                        (currRange.startIndex + startOffset)..<(currRange.endIndex + startOffset)
+                    // Kooky to avoid Swift formatter screwing up the range syntax
+                    let (actualRangeStart, actualRangeEnd) = (
+                        currRange.startIndex + fullChunkDataAbsoluteStart,
+                        currRange.endIndex + fullChunkDataAbsoluteStart
+                    )
+                    let actualRange = actualRangeStart..<actualRangeEnd
 
                     // The 2s account for the {{ and }}
                     if prevEnd < actualRange.lowerBound - surroundingWidth {
@@ -965,7 +885,7 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                 }
 
                 // Append remaining HTML content
-                if prevEnd < (UInt64(exactly: chunkData.count)! + startOffset) {
+                if prevEnd < (UInt64(exactly: fullChunkData.count)! + fullChunkDataAbsoluteStart) {
                     typedParsingObjectPointer.pointee.appendHTMLContent(
                         byteRange: prevEnd..<endOffset
                     )

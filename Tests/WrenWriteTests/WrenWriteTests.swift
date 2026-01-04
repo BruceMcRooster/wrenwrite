@@ -276,8 +276,18 @@ struct MarkdownRenderingTests {
 
             And this `<video src="notaurl.mp4"></video>` doesn't have quotes on its `poster` link
 
-            <div><video src='mymedia.mp4' poster=myposter.jpg><track label="English" kind="subtitles" srclang="en" src="subtitles.vtt" /></video></div>
+            <div><video 
+                src='mymedia.mp4' 
+                poster=myposter.jpg
+            ><track label="English" kind="subtitles" srclang="en" src="subtitles.vtt" />
+            </video></div>
 
+            This image doesn't properly close
+            
+            <div>
+                <img src="not-gonna-be-a-url.jpg"
+                will-trick-markdown="</div>"
+            
             And finally (this may just blow things up), this block has a preceding space 😱,
 
               <img src="scared-face.png" />
@@ -299,7 +309,15 @@ struct MarkdownRenderingTests {
                     <script src=""></script>
                     <link rel="stylesheet" href=''>
                     <p>And this <code>&lt;video src=&quot;notaurl.mp4&quot;&gt;&lt;/video&gt;</code> doesn't have quotes on its <code>poster</code> link</p>
-                    <div><video src='' poster=><track label="English" kind="subtitles" srclang="en" src="" /></video></div>
+                    <div><video 
+                        src='' 
+                        poster=
+                    ><track label="English" kind="subtitles" srclang="en" src="" />
+                    </video></div>
+                    <p>This image doesn't properly close</p>
+                    <div>
+                        <img src="not-gonna-be-a-url.jpg"
+                        will-trick-markdown="</div>"
                     <p>And finally (this may just blow things up), this block has a preceding space 😱,</p>
                       <img src="" />
 
@@ -315,12 +333,10 @@ struct MarkdownRenderingTests {
                 nil
             }
         }
-        
-        print(allFoundURLStrings)
-        
+                
         for (index, desiredURLString) in [
             "https://example.com",
-            "something.jpg\nsomething-bigger.jpg",
+            "something.jpg\n        something-bigger.jpg",
             "myscript.js",
             "mystyles.css",
             "mymedia.mp4",
@@ -331,7 +347,76 @@ struct MarkdownRenderingTests {
             let foundIndex = allFoundURLStrings.firstIndex(of: desiredURLString)
             
             if let foundIndex {
-                #expect(foundIndex == index * 2 + 1)
+                #expect(foundIndex == index)
+            } else {
+                #expect(Bool(false), "Did not find URL: \(desiredURLString)")
+            }
+        }
+    }
+    
+    @Test func cssURLs() async throws {
+        let output = Output()
+        
+        let markdown = """
+            Although style tags shouldn't be included in the body of markdown, 
+            we'll support them anyway to unify the API 
+            (thus, we can run the head through this and it will process the HTML).
+            Styles may link to external resources elsewhere in the app using the `url` function, so we extract their values too.
+            
+            <style>
+                background-image: url("birds.gif");
+                cursor: url(cursor.cur);
+                offset-path: url('newlines/\\
+            can/be/escaped.svg');
+                mask-image: image(url (
+                            whitespace/works/around.png
+                            ), tangerine, linear-gradient(black, transparent));
+                content: url ( "and/tags/break/based/on/markdown/rules"</style>)
+            """.data(using: .utf8)!
+        
+        let result: (frontmatter: Int?, content: [MarkdownContent]) = try renderMarkdown(
+            from: markdown, writer: output)
+        
+        #expect(
+            String(
+                data: getMarkdownContent(from: output.data, basedOn: result.content),
+                encoding: .utf8) == """
+                    <p>Although style tags shouldn't be included in the body of markdown,
+                    we'll support them anyway to unify the API
+                    (thus, we can run the head through this and it will process the HTML).
+                    Styles may link to external resources elsewhere in the app using the <code>url</code> function, so we extract their values too.</p>
+                    <style>
+                        background-image: url("");
+                        cursor: url();
+                        offset-path: url('');
+                        mask-image: image(url (
+                                   \u{20}
+                                    ), tangerine, linear-gradient(black, transparent));
+                        content: url ( "and/tags/break/based/on/markdown/rules"</style>)
+
+                    """
+        )
+        
+        #expect(result.content.count == 9)
+        
+        let allFoundURLStrings: Array<String> = result.content.compactMap { markdownContent in
+            if case let .url(string) = markdownContent {
+                string
+            } else {
+                nil
+            }
+        }
+                
+        for (index, desiredURLString) in [
+            "birds.gif",
+            "cursor.cur",
+            "newlines/\\\ncan/be/escaped.svg",
+            "whitespace/works/around.png"
+        ].enumerated() {
+            let foundIndex = allFoundURLStrings.firstIndex(of: desiredURLString)
+            
+            if let foundIndex {
+                #expect(foundIndex == index)
             } else {
                 #expect(Bool(false), "Did not find URL: \(desiredURLString)")
             }
