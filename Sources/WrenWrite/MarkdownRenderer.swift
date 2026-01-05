@@ -565,6 +565,8 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
 
             var currChunkIndex: Int = chunkData.startIndex
 
+            var embedStart: Int? = nil
+
             while currChunkIndex < chunkData.count {
                 assert(!(inScript && inStyle))
 
@@ -640,12 +642,28 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                     if let (tagName, tagIsCloser) = try extractURLsHTMLTag(
                         canCrossLines: true, beg: currChunkIndex, end: &end)
                     {
+                        embedStart = nil  // A tag should stop any embeds
                         currChunkIndex = end - 1  // -1 for increment after loop
                         if !tagIsCloser {
                             inScript = tagName == "script"
                             inStyle = tagName == "style"
                         }
                     }
+                } else if chunkData[currChunkIndex] == Character("{").asciiValue!
+                    && currChunkIndex + 1 < chunkData.count
+                    && chunkData[currChunkIndex + 1] == Character("{").asciiValue!
+                {
+                    embedStart = currChunkIndex + 2
+                    // Intentionally don't step forward, because that will catch {`{{` as the starter
+                } else if let knownEmbedStart = embedStart,
+                    chunkData[currChunkIndex] == Character("}").asciiValue!
+                        && currChunkIndex + 1 < chunkData.count
+                        && chunkData[currChunkIndex + 1] == Character("}").asciiValue!
+                {
+                    if knownEmbedStart < currChunkIndex - 1 {
+                        embedRanges.append(UInt64(knownEmbedStart)..<UInt64(currChunkIndex))
+                    }
+                    embedStart = nil
                 }
 
                 currChunkIndex += 1

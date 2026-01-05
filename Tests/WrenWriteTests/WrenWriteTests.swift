@@ -422,4 +422,46 @@ struct MarkdownRenderingTests {
             }
         }
     }
+    
+    @Test func htmlEmbeds() async throws {
+        let output = Output()
+        
+        let markdown = """
+            <div>
+                <p>If one should decide they wish to include the {{post_published_date}} in their html,
+                it should be properly extracted. Of course, {{post_
+            title}} should never be allowed to span multiple lines</p>
+            </div>
+            """.data(using: .utf8)!
+        
+        let result: (frontmatter: Int?, content: [MarkdownContent]) = try renderMarkdown(
+            from: markdown, writer: output)
+        
+        #expect(
+            String(
+                data: getMarkdownContent(from: output.data, basedOn: result.content),
+                encoding: .utf8) == """
+                    <div>
+                        <p>If one should decide they wish to include the  in their html,
+                        it should be properly extracted. Of course, {{post_
+                    title}} should never be allowed to span multiple lines</p>
+                    </div>
+
+                    """
+        )
+        
+        #expect(result.content.count == 3)
+        
+        let allFoundEmbeds: Array<MarkdownContent.Embed> = result.content.compactMap { markdownContent in
+            if case let .embed(embed) = markdownContent {
+                embed
+            } else {
+                nil
+            }
+        }
+                
+        #expect(allFoundEmbeds.count == 1)
+        let isAPostPublishedDateEmbed = if case .postPublishedDate = allFoundEmbeds.first { true } else { false }
+        #expect(isAPostPublishedDateEmbed)
+    }
 }
