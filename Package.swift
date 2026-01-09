@@ -12,7 +12,9 @@ let package = Package(
         .executable(name: "WrenWrite", targets: ["WrenWrite"])
     ],
     dependencies: [
-        .package(url: "https://github.com/jpsim/Yams.git", from: "6.0.1"),
+        // Need this instead of Yams for compatibility with C++ interop mode.
+        // See https://github.com/jpsim/Yams/pull/467 for more info on status in main project.
+        .package(url: "https://github.com/johnfairh/Yams.git", branch: "cyaml-swift-cpp"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -23,8 +25,13 @@ let package = Package(
                 .product(name: "Yams", package: "Yams"),
                 "md4c_html",
             ],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
-        .testTarget(name: "WrenWriteTests", dependencies: ["WrenWrite"]),
+        .testTarget(
+            name: "WrenWriteTests", 
+            dependencies: ["WrenWrite"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
         .target(
             name: "md4c_html",
             path: "Sources/md4c",
