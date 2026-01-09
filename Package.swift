@@ -15,6 +15,10 @@ let package = Package(
         // Need this instead of Yams for compatibility with C++ interop mode.
         // See https://github.com/jpsim/Yams/pull/467 for more info on status in main project.
         .package(url: "https://github.com/johnfairh/Yams.git", branch: "cyaml-swift-cpp"),
+        .package(
+            url: "https://github.com/BruceMcRooster/blahtexml.git",
+            revision: "04fa822fd8a1c8a67c1ce71649b4b702aa57891f"
+        ),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -23,6 +27,7 @@ let package = Package(
             name: "WrenWrite",
             dependencies: [
                 .product(name: "Yams", package: "Yams"),
+                .product(name: "Blahtex", package: "blahtexml"),
                 "md4c_html",
             ],
             swiftSettings: [.interoperabilityMode(.Cxx)]

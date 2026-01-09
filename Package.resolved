@@ -1,6 +1,23 @@
 {
-  "originHash" : "78f1b1e61a590d9b1184a1b3ecfabf467d47ac66064ce8e10cfba04dd25169ce",
+  "originHash" : "06730d7d8e6a5b0f6f0165c6f05d00e14c680c70a23b84ffd145557c538f5378",
   "pins" : [
+    {
+      "identity" : "blahtexml",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/BruceMcRooster/blahtexml.git",
+      "state" : {
+        "revision" : "04fa822fd8a1c8a67c1ce71649b4b702aa57891f"
+      }
+    },
+    {
+      "identity" : "swiftwstringcompat",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/BruceMcRooster/SwiftWStringCompat.git",
+      "state" : {
+        "revision" : "c108c7440cd4ec58a0bd783817a2a5252b77c5af",
+        "version" : "1.0.0"
+      }
+    },
     {
       "identity" : "yams",
       "kind" : "remoteSourceControl",
