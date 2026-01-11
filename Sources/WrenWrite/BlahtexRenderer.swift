@@ -22,10 +22,10 @@ func renderBlahtexToMathML(_ input: String, display: MarkdownContent.MathChunk.D
             """, didError: false)
     } catch let e {
         switch e {
-        case let .blahtexError(errorMessage):
+        case let .inputError(error):
             return (htmlMathTag: """
                 <span class="blahtex-error" \
-                title="\((errorMessage ?? "there was a problem parsing the error message")
+                title="\(error.errorMessage()
                     .replacingOccurrences(of: "\"", with: "&quot;"))" \
                 style="color:#cc0000">"\(input)"</span>
                 """, didError: true)

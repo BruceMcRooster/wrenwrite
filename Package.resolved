@@ -1,12 +1,12 @@
 {
-  "originHash" : "06730d7d8e6a5b0f6f0165c6f05d00e14c680c70a23b84ffd145557c538f5378",
+  "originHash" : "0b44617908ad45edce25d81c35cad1292613a6fee536ba27887d5a2b87520a4b",
   "pins" : [
     {
       "identity" : "blahtexml",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/BruceMcRooster/blahtexml.git",
       "state" : {
-        "revision" : "04fa822fd8a1c8a67c1ce71649b4b702aa57891f"
+        "revision" : "630a2289af5b41b3235e4e263db567b187f30341"
       }
     },
     {

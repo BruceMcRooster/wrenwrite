@@ -17,7 +17,7 @@ let package = Package(
         .package(url: "https://github.com/johnfairh/Yams.git", branch: "cyaml-swift-cpp"),
         .package(
             url: "https://github.com/BruceMcRooster/blahtexml.git",
-            revision: "04fa822fd8a1c8a67c1ce71649b4b702aa57891f"
+            revision: "630a2289af5b41b3235e4e263db567b187f30341"
         ),
     ],
     targets: [
