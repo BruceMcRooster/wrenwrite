@@ -1,44 +1,73 @@
 import Foundation
 import Blahtex
 
-/// Renders some Blahtex (basically LaTeX) code to
-func renderBlahtexToMathML(_ input: String, display: MarkdownContent.MathChunk.DisplayStyle) -> (htmlMathTag: String, didError: Bool) {
+struct BlahtexError: Error {
+    let errorMessage: String
+    let actualError: Blahtex.BlahtexRenderer.BlahtexError
+}
+
+/// Renders some Blahtex (basically LaTeX) code to MathML (does not include the surrounding `<math>` tag)
+func latexToMathML(_ input: String) throws(BlahtexError) -> String {
     let renderer = BlahtexRenderer()
     
-    renderer.mathMLOptions.spacingControl = .moderate
+    // At least Safari, maybe others will mess up spacing without strict spacing control.
+    // This outputs more verbose MathML where browsers might mess up spacing.
+    renderer.mathMLOptions.spacingControl = .strict
     
     do {
         try renderer.processInput(input)
         
         let mathML = try renderer.getMathML()
         
-        return (htmlMathTag: """
-            <math xmlns="http://www.w3.org/1998/Math/MathML" display="\(display == .inline ? "inline" : "block")">\
-            <semantics>\
-            \(mathML)\
-            <annotation encoding="application/x-tex">"\(input)"</annotation>\
-            </semantics>\
-            </math>
-            """, didError: false)
+        return mathML
     } catch let e {
         switch e {
         case let .inputError(error):
-            return (htmlMathTag: """
-                <span class="blahtex-error" \
-                title="\(error.errorMessage()
-                    .replacingOccurrences(of: "\"", with: "&quot;"))" \
-                style="color:#cc0000">"\(input)"</span>
-                """, didError: true)
+            throw .init(
+                errorMessage: error.errorMessage(), 
+                actualError: e
+            )
         case let .otherError(errorMessage):
             assertionFailure("Unexpected error from Blahtex: \(errorMessage)")
-            return (htmlMathTag: """
-            <span class="blahtex-error" title="Unexpected internal Blahtex error (please file a bug report): \(errorMessage.replacingOccurrences(of: "\"", with: "&quot;"))" style="color:#cc0000">"\(input)"</span>
-            """, didError: true)
+            throw .init(
+                errorMessage: "Unexpected internal Blahtex error (please file a bug report): \(errorMessage)", 
+                actualError: e
+            )
         case .unconvertibleString:
             assertionFailure("Swift-C++ interoperability error during string conversion")
-            return (htmlMathTag: """
-                <span class="blahtex-error" title="Unexpected internal wstring error (please file a bug report)" style="color:#cc0000">"\(input)"</span>
-                """, didError: true)
+            throw .init(
+                errorMessage: "Unexpected internal wstring error (please file a bug report)", 
+                actualError: e
+            )
         }
     }
+}
+
+/// Takes MathML as an input and renders it into a full HTML `<math>` tag.
+func renderMathML(
+    latexCode: String, 
+    mathML: String, 
+    display: MarkdownContent.MathChunk.DisplayStyle
+) -> String {
+    return """
+        <math xmlns="http://www.w3.org/1998/Math/MathML" display="\(display == .inline ? "inline" : "block")">\
+        <semantics>\
+        \(mathML)\
+        <annotation encoding="application/x-tex">"\(latexCode)"</annotation>\
+        </semantics>\
+        </math>
+        """
+}
+
+/// Takes a rendering error and outputs the corresponding HTML to display it.
+func renderMathMLError(
+    latexCode: String, 
+    error: BlahtexError, 
+    display: MarkdownContent.MathChunk.DisplayStyle
+) -> String {
+    return """
+        <span display="\(display == .inline ? "inline" : "block")" style="color: #cc0000">\
+        \(error.errorMessage.replacingOccurrences(of: "\"", with: "&quot;"))\
+        </span>
+        """
 }
