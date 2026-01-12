@@ -266,7 +266,7 @@ struct MarkdownRenderingTests {
 
             <div>
                 <img srcset="something.jpg
-                    something-bigger.jpg">
+                    something-bigger.jpg 2x">
             </div>
 
             These script and style tags link to external things
@@ -336,7 +336,7 @@ struct MarkdownRenderingTests {
                 
         for (index, desiredURLString) in [
             "https://example.com",
-            "something.jpg\n        something-bigger.jpg",
+            "something.jpg\n        something-bigger.jpg 2x",
             "myscript.js",
             "mystyles.css",
             "mymedia.mp4",
