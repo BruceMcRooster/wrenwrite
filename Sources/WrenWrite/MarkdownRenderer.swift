@@ -830,11 +830,15 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                     fullChunkDataAbsoluteStart = startOffset
                 }
 
-                guard let (urlRanges, embedRanges) = try? findURLsAndEmbedsIn(fullChunkData) else {
+                guard let (staticURLRanges, embedRanges) = try? findURLsAndEmbedsIn(fullChunkData) else {
                     typedParsingObjectPointer.pointee.partialHTML = fullChunkData
                     return  // Wait for the next time around to try again with more complete HTML
                 }
 
+                // Need to make it mutable because we might have to insert into it
+                // for srcset attributes that contain multiple URLs or other things that needs to be left along
+                var urlRanges = consume staticURLRanges
+                
                 // Found successfully, so we need to cleanup
                 typedParsingObjectPointer.pointee.partialHTML = nil
 
@@ -859,7 +863,78 @@ func renderMarkdown<Writer: DataWriter, FrontmatterDecodeType: Decodable>(
                         urlIndex += 1
 
                         currRange = urlRange
-                        currContent = .url(String(data: fullChunkData[urlRange], encoding: .utf8)!)
+                        var rawURLData = String(data: fullChunkData[urlRange], encoding: .utf8)!
+                        
+                        // MARK: Clean raw HTML URL
+                        
+                        // Based partially on https://html.spec.whatwg.org/#srcset-attributes.
+                        // URL part just takes any character and allows for escaping.
+                        let urls = rawURLData.matches(of: #/
+                            (?s) # Allows for matching escaped newlines with \\. (turns on dot matching newline)
+                            \s*
+                                (?<url>(?:\\.|[^\\\s])+) # Allows for any character in url to be escaped
+                            \s* # This not being a + should be fine, since previous part will greedily consume
+                                (?<descriptor> # Grab (optional) descriptor
+                                    \d+w # Either a width descriptor
+                                        | # or a pixel density descriptor
+                                    -? # Allow negative sign in floating point because browsers can be permissive, 
+                                       # but technically invalid
+                                    (?:
+                                        \d+(?:\.\d+)? # Grab a digit before decimal point and after (e.g. 2.8)
+                                            | # or
+                                        \.\d+ # only a decimal point with digits after it (e.g. .8)
+                                    ) # Specifies so as not to accept e5x or something (must have decimal part)
+                                    (?:[eE][+-]?\d+)? # Optional exponent part
+                                    x # x for pixel density descriptor
+                                )? # Make sure this is greedy so we eat up these descriptors and don't capture them as urls
+                            \s*
+                        /#)
+                        
+                        // Check for less than because there's a chance my regex doesn't catch something, but we should still spit out
+                        guard urls.count < 2 && (urls.count == 0 || urls[0].output.descriptor == nil) else { 
+                            // Need to split up based on multiple URLs
+                            
+                            var currRegex = urls[urls.endIndex - 1]
+                            // Go backwards so that as we append we eventually get the first ranges first
+                            for i in stride(from: urls.endIndex - 1, through: 0, by: -1) {
+                                currRegex = urls[i]
+                                
+                                let realURLLowerBound = UInt64(
+                                    rawURLData.utf8.distance(
+                                        from: rawURLData.utf8.startIndex, 
+                                        to: currRegex.output.url.startIndex.samePosition(in: rawURLData.utf8)!
+                                    )
+                                ) + urlRange.startIndex
+                                
+                                let realURLUpperBound = UInt64(
+                                    rawURLData.utf8.distance(
+                                        from: rawURLData.utf8.startIndex, 
+                                        to: currRegex.output.url.endIndex.samePosition(in: rawURLData.utf8)!
+                                    )
+                                ) + urlRange.startIndex
+                                
+                                urlRanges.insert(realURLLowerBound..<realURLUpperBound, at: urlIndex)
+                            }
+                            
+                            continue // let processing continue happening with the new ranges
+                        }
+                        
+                        // Potential TODO: could reinsert single urls (that we can pick up in regex)
+                        // so that miscellaneous spacing/newlines are preserved.
+                        // Not essential, though, since any essential spacing
+                        // (that between multiple urls or between a url and its descriptor)
+                        // will be handled properly.
+                        // Would be purely to allow more user customization of the styling of their code.
+                        
+                        rawURLData = rawURLData.trimmingCharacters(in: .whitespacesAndNewlines)
+                        // Remove escaped spaces and newlines
+                        rawURLData = rawURLData.replacing(/\\\s/, with: "")
+                        // De-escape any backslash-escaped characters
+                        // Potential TODO: actual handle escaping the right things in the right places (e.g. only \" in double quotes),
+                        // but this should do the trick for now
+                        rawURLData = rawURLData.replacing(/\\(.)/, with: { $0.output.1 })
+                        
+                        currContent = .url(rawURLData)
                         surroundingWidth = 0
                     } else {
                         assert(embedIndex < embedRanges.count)

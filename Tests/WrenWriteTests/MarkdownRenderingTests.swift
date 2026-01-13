@@ -303,7 +303,8 @@ struct MarkdownRenderingTests {
                     <p>This is a manually typed inline <a href="">link</a> that should be caught</p>
                     <p>This image has a <code>srcset</code>, and spans multiple lines</p>
                     <div>
-                        <img srcset="">
+                        <img srcset="
+                             2x">
                     </div>
                     <p>These script and style tags link to external things</p>
                     <script src=""></script>
@@ -324,7 +325,7 @@ struct MarkdownRenderingTests {
                     """
         )
 
-        #expect(result.content.count == 17)
+        #expect(result.content.count == 19)
         
         let allFoundURLStrings: Array<String> = result.content.compactMap { markdownContent in
             if case let .url(string) = markdownContent {
@@ -336,7 +337,8 @@ struct MarkdownRenderingTests {
                 
         for (index, desiredURLString) in [
             "https://example.com",
-            "something.jpg\n        something-bigger.jpg 2x",
+            "something.jpg",
+            "something-bigger.jpg",
             "myscript.js",
             "mystyles.css",
             "mymedia.mp4",
@@ -410,7 +412,7 @@ struct MarkdownRenderingTests {
         for (index, desiredURLString) in [
             "birds.gif",
             "cursor.cur",
-            "newlines/\\\ncan/be/escaped.svg",
+            "newlines/can/be/escaped.svg",
             "whitespace/works/around.png"
         ].enumerated() {
             let foundIndex = allFoundURLStrings.firstIndex(of: desiredURLString)
